@@ -24,6 +24,7 @@
 #include "nissan_romdefs.h"
 #include "nislib.h"
 #include "nislib_shtools.h"
+#include "nisrom_finders.h"
 #include "nisrom_keyfinders.h"
 #include "nis_romdb.h"
 
