@@ -23,6 +23,9 @@
 /* this needs to be valid; debugging output is written to this.*/
 extern FILE *dbg_stream;	//such as as stdout or stderr
 
+#define DBG_PRINTF(fmt, ...) fprintf(dbg_stream, fmt, ##__VA_ARGS__)
+#define ERR_PRINTF(fmt, ...) fprintf(stderr, fmt, ##__VA_ARGS__)
+
 /** get file length but restore position */
 uint32_t flen(FILE *hf);
 
@@ -75,32 +78,6 @@ uint32_t enc1(uint32_t data, uint32_t scode);
  * @param scode key to use
  */
 uint32_t dec1(uint32_t data, uint32_t scode);
-
-/* key stuff */
-
-enum key_type {
-	KEY_S27 = 0,	//SID27 key
-	KEY_S36K1,	//SID36 kernel key
-	KEY_S36K2,	//SID36 factory payload key (less useful)
-	KEY_INVALID,
-};
-
-struct keyset_t {
-	uint32_t s27k;
-	uint32_t s36k1;
-	uint32_t s36k2;
-	};
-
-extern const struct keyset_t known_keys[];
-
-
-/** try to see if candidate matches one known keyset.
- *
- * @param candidate must not be 0
- *
- * return NULL if not found
- */
-const struct keyset_t *find_knownkey(enum key_type ktype, u32 candidate);
 
 /** Sum and xor all uint32_t values in *buf, read with SH endianness
  * @param [out] *xor

@@ -5,6 +5,7 @@
 
 
 #include <assert.h>
+#include <errno.h>
 #include <limits.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -65,7 +66,23 @@ nis_romdb *romdb_new(void) {
  */
 void romdb_close(nis_romdb *romdb) {
 	assert(romdb);
-	//TODO : delete hashtables
+
+	if (romdb->ecuid_table) {
+		struct ecuid_rec *ecr, *tmp;
+		HASH_ITER(hh, romdb->ecuid_table, ecr, tmp) {
+			HASH_DEL(romdb->ecuid_table, ecr);
+			free(ecr);             /* optional- if you want to free  */
+		}
+		romdb->ecuid_table = NULL;
+	}
+	if (romdb->keyset_table) {
+		struct keyset_rec *ksr, *tmp;
+		HASH_ITER(hh, romdb->keyset_table, ksr, tmp) {
+			HASH_DEL(romdb->keyset_table, ksr);
+			free(ksr);             /* optional- if you want to free  */
+		}
+		romdb->keyset_table = NULL;
+	}
 	free(romdb);
 }
 
@@ -134,7 +151,7 @@ static void csv_ecuid_process_header(void *s, size_t len, void *data) {
 	struct csvinfo_ecuid *ci = data;
 
 	if (len) {
-		//printf("cb1 #%u, %s \n", ci->num_fields, (const char *)s);
+		//DBG_PRINTF("cb1 #%u, %s \n", ci->num_fields, (const char *)s);
 		if (strncmp("ECUID", s, len) == 0) {
 			ci->idx_ecuid = ci->num_fields;
 		}
@@ -178,7 +195,7 @@ static void csv_ecuid_header_done(int c, void *data) {
 	if (	ci->idx_ecuid == UINT_MAX ||
 			ci->idx_fidtype == UINT_MAX ||
 			ci->idx_keyset == UINT_MAX ) {
-		printf("bad csv header\n");
+		ERR_PRINTF("bad csv header\n");
 		ci->parse_error = 1;
 	}
 	ci->header_parsed = 1;
@@ -193,7 +210,7 @@ static void csv_keyset_header_done(int c, void *data) {
 	if (	ci->idx_s27k == UINT_MAX ||
 			ci->idx_s36k1 == UINT_MAX ||
 			ci->idx_s36k2 == UINT_MAX ) {
-		printf("bad csv header\n");
+		ERR_PRINTF("bad csv header\n");
 		ci->parse_error = 1;
 	}
 	ci->header_parsed = 1;
@@ -214,19 +231,19 @@ static void csv_ecuid_field_cb(void *s, size_t len, void *data) {
 
 	if (ci->current_field == ci->idx_ecuid) {
 		if (len != ECUID_LEN) {
-			printf("bad ECUID field: %s\n", (char *) s);
+			ERR_PRINTF("bad ECUID field: %s\n", (char *) s);
 			ci->parse_error = 1;
 		} else {
 			memcpy(ci->current_ecr.ecuid, s, ECUID_LEN);
 		}
 	} else if (ci->current_field == ci->idx_fidtype) {
 		if (len < FIDTYPE_LEN) {
-			printf("bad FIDTYPE: %s\n", (char *) s);
+			ERR_PRINTF("bad FIDTYPE: %s\n", (char *) s);
 			ci->parse_error = 1;
 		} else {
 			enum fidtype_ic fidtype = get_fidtype(s);
 			if (fidtype == FID_UNK) {
-				printf("bad FIDTYPE: %s\n", (char *) s);
+				ERR_PRINTF("bad FIDTYPE: %s\n", (char *) s);
 				ci->parse_error = 1;
 			} else {
 				ci->current_ecr.fidtype = fidtype;
@@ -234,13 +251,13 @@ static void csv_ecuid_field_cb(void *s, size_t len, void *data) {
 		}
 	} else if (ci->current_field == ci->idx_keyset) {
 		if (!len) {
-			printf("bad keyset field\n");
+			ERR_PRINTF("bad keyset field\n");
 			ci->parse_error = 1;
 		} else {
 			unsigned long s27k = 0;
 			sscanf(s, "%lx", &s27k);
 			if (!s27k || (s27k > UINT32_MAX)) {
-				printf("bad keyset %s\n", (char *) s);
+				ERR_PRINTF("bad keyset %s\n", (char *) s);
 				ci->parse_error = 1;
 			} else {
 				ci->current_ecr.s27k = s27k;
@@ -282,7 +299,7 @@ static void csv_keyset_field_cb(void *s, size_t len, void *data) {
 	unsigned long tmp = 0;
 	int rv = sscanf(s, "%lx", &tmp);
 	if ((rv != 1) || (tmp > UINT32_MAX)) {
-		printf("can't parse %s\n", (char *) s);
+		ERR_PRINTF("can't parse %s\n", (char *) s);
 		ci->parse_error = 1;
 		goto fastexit;
 	}
@@ -323,7 +340,7 @@ static void csv_ecuid_rec_cb(int c, void *data) {
 			HASH_ADD_STR(*ci->ecuid_table, ecuid, ecr);
 			ci->num_recs++;
 		}
-		printf("%s\t%u\t%08lX\n", ecr->ecuid, ecr->fidtype, (unsigned long) ecr->s27k);
+		//DBG_PRINTF("%s\t%u\t%08lX\n", ecr->ecuid, ecr->fidtype, (unsigned long) ecr->s27k);
 	}
 
 recdone_exit:
@@ -358,7 +375,7 @@ static void csv_keyset_rec_cb(int c, void *data) {
 			HASH_ADD_U32(*ci->keyset_table, keyset.s27k, ksr);
 			ci->num_recs++;
 		}
-		printf("%08lX\t%08lX\t%08lX\n", (unsigned long) ksr->keyset.s27k, (unsigned long) ksr->keyset.s36k1, (unsigned long) ksr->keyset.s36k2);
+		//DBG_PRINTF("%08lX\t%08lX\t%08lX\n", (unsigned long) ksr->keyset.s27k, (unsigned long) ksr->keyset.s36k1, (unsigned long) ksr->keyset.s36k2);
 	}
 
 recdone_exit:
@@ -385,7 +402,7 @@ static bool romdb_addcsv_backend(const char *fname,
 	// open file
 	FILE *fh = fopen(fname, "rb");
 	if (!fh) {
-		printf("bad fopen\n");
+		ERR_PRINTF("can't open \"%s\": %s\n", fname, strerror (errno));
 		goto badexit;
 	}
 
@@ -396,16 +413,20 @@ static bool romdb_addcsv_backend(const char *fname,
 	u8 readbuf[1024];
 	while ((bytes_read=fread(readbuf, 1, sizeof(readbuf), fh)) > 0) {
 		if (csv_parse(&csvp, readbuf, bytes_read, field_cb, record_cb, cbdata) != bytes_read) {
-			fprintf(stderr, "Error while parsing file: %s\n", csv_strerror(csv_error(&csvp)) );
+			ERR_PRINTF("Error while parsing file: %s\n", csv_strerror(csv_error(&csvp)) );
 			goto badexit;
 		}
 	}
 
 	csv_fini(&csvp, field_cb, record_cb, cbdata);
 	csv_free(&csvp);
+	fclose(fh);
 	return 1;
 
 badexit:
+	if (fh) {
+		fclose(fh);
+	}
 	csv_free(&csvp);
 	return 0;
 }
@@ -427,7 +448,7 @@ bool romdb_ecuid_addcsv(nis_romdb *romdb, const char *fname) {
 		return 0;
 	}
 
-	printf("ecuid parsage done : added %u records\n", ci.num_recs);
+	DBG_PRINTF("ecuid parsage done : added %u records\n", ci.num_recs);
 	return 1;
 }
 
@@ -448,7 +469,7 @@ bool romdb_keyset_addcsv(nis_romdb *romdb, const char *fname) {
 		return 0;
 	}
 
-	printf("keyset parsage done : added %u records\n", ci.num_recs);
+	DBG_PRINTF("keyset parsage done : added %u records\n", ci.num_recs);
 	return 1;
 }
 
@@ -468,6 +489,16 @@ enum fidtype_ic romdb_q_fidtype(nis_romdb *romdb, const char *ecuid) {
 
 const struct keyset_t *romdb_q_keyset(nis_romdb *romdb, const char *ecuid) {
 	assert(romdb && ecuid);
+
+	if (!romdb->ecuid_table) {
+		//no assert for this, since caller can't tell if db exists
+		return NULL;
+	}
+	if (!romdb->keyset_table) {
+		//no assert for this, since caller can't tell if db exists
+		return NULL;
+	}
+
 	struct ecuid_rec *ecr;
 	HASH_FIND_STR(romdb->ecuid_table, ecuid, ecr);
 	if (!ecr) {
@@ -481,4 +512,60 @@ const struct keyset_t *romdb_q_keyset(nis_romdb *romdb, const char *ecuid) {
 	}
 
 	return &ksr->keyset;
+}
+
+
+const struct keyset_t *find_knownkey(nis_romdb *romdb, enum key_type ktype, u32 candidate) {
+	assert(romdb);
+
+	if (!romdb->keyset_table) {
+		//no assert for this, since caller can't tell if this table exists
+		return NULL;
+	}
+
+	if ((ktype >= KEY_INVALID) || !candidate) {
+		return NULL;
+	}
+
+	const struct keyset_rec *ksr, *tmp;
+	HASH_ITER(hh, romdb->keyset_table, ksr, tmp) {
+		switch (ktype) {
+		case KEY_S27:
+			if (ksr->keyset.s27k == candidate) {
+				return &ksr->keyset;
+			}
+			break;
+		case KEY_S36K1:
+			if (ksr->keyset.s36k1 == candidate) {
+				return &ksr->keyset;
+			}
+			break;
+		case KEY_S36K2:
+			if (ksr->keyset.s36k2 == candidate) {
+				return &ksr->keyset;
+			}
+			break;
+		default:
+			assert(0);
+			break;
+		}
+	}
+	return NULL;
+}
+
+void keysets_iterate(nis_romdb *romdb, bool (*cb1)(const struct keyset_t *keyset, void *data), void *data) {
+	assert(romdb && cb1);
+
+	if (!romdb->keyset_table) {
+		//no assert for this, since caller can't tell if this table exists
+		return;
+	}
+
+	const struct keyset_rec *ksr, *tmp;
+	HASH_ITER(hh, romdb->keyset_table, ksr, tmp) {
+		bool rv = cb1(&ksr->keyset, data);
+		if (rv) {
+			return;
+		}
+	}
 }

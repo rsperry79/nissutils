@@ -32,7 +32,7 @@
 
 
 #define DBG_OUTFILE	"nisrom_dbg.log"	//default log file
-#define ERR_PRINTF(fmt, ...) fprintf(stderr, fmt, ##__VA_ARGS__)
+#define KEYSET_CSV "../romdb/keysets.csv"	//default keyset db file
 
 #if (CHAR_BIT != 8)
 #error HAH ! a non-8bit char system. Some of this will not work
@@ -50,6 +50,9 @@ struct romfile {
 	const char *filename;
 	u32 siz;	//in bytes
 	uint8_t *buf;	//copied here
+
+	nis_romdb *romdb;
+
 	//and some metadata
 	rom_offset p_loader;	//struct loader
 	enum loadvers_t loader_v;	//version (10, 50, 60 etc)
@@ -145,7 +148,10 @@ static int open_rom(struct romfile *rf, const char *fname) {
 	return 0;
 }
 
-//close & free whatever
+/** close & free romfile contents
+ *
+ * safe to call multiple times or if nothing is open yet
+ */
 void close_rom(struct romfile *rf) {
 	if (!rf) return;
 	if (rf->buf) {
@@ -234,7 +240,7 @@ u32 find_loader(struct romfile *rf) {
 	/* look for "LOADER", backtrack to beginning of struct. */
 	sl = u8memstr(rf->buf, rf->siz, loadstr, 6);
 	if (!sl) {
-		fprintf(dbg_stream, "LOADER not found !\n");
+		DBG_PRINTF("LOADER not found !\n");
 		return -1;
 	}
 
@@ -307,7 +313,7 @@ u32 find_fid(struct romfile *rf) {
 	/* look for "DATABASE" */
 	sf = u8memstr(rf->buf, rf->siz, dbstr, 5);
 	if (!sf) {
-		fprintf(dbg_stream, "no DATABASE found !?\n");
+		DBG_PRINTF("no DATABASE found !?\n");
 		return -1;
 	}
 	//convert to file offset
@@ -321,7 +327,7 @@ u32 find_fid(struct romfile *rf) {
 			sf = u8memstr(&rf->buf[sf_offset + sizeof(struct loader_t)], rf->siz - sf_offset - 1 , dbstr, 5);
 		}
 		if (!sf) {
-			fprintf(dbg_stream, "no FID DATABASE found !\n");
+			DBG_PRINTF("no FID DATABASE found !\n");
 			return -1;
 		}
 		//convert to file offset again
@@ -330,7 +336,7 @@ u32 find_fid(struct romfile *rf) {
 
 	//bounds check
 	if ((sf_offset + FID_MAXSIZE) >= rf->siz) {
-		fprintf(dbg_stream, "Possibly incomplete / bad dump ? FID too close to end of ROM\n");
+		DBG_PRINTF("Possibly incomplete / bad dump ? FID too close to end of ROM\n");
 		return -1;
 	}
 
@@ -343,13 +349,13 @@ u32 find_fid(struct romfile *rf) {
 	/* determine FID type : iterate through array of known types, matching the CPU string */
 	rf->fid_ic = get_fidtype(rf->fid_cpu);
 	if (rf->fid_ic == FID_UNK) {
-		fprintf(dbg_stream, "Unknown FID IC type %.8s ! Cannot proceed\n", rf->fid_cpu);
+		DBG_PRINTF("Unknown FID IC type %.8s ! Cannot proceed\n", rf->fid_cpu);
 		return -1;
 	}
 
 	rf->fidtype = &fidtypes[rf->fid_ic];
 	if (rf->siz != (rf->fidtype->ROMsize)) {
-		fprintf(dbg_stream, "Warning : ROM size %u k, expected %u k; possibly incomplete dump\n",
+		DBG_PRINTF("Warning : ROM size %u k, expected %u k; possibly incomplete dump\n",
 				rf->siz / 1024, rf->fidtype->ROMsize / 1024);
 	}
 
@@ -389,18 +395,18 @@ int validate_altcks(struct romfile *rf) {
 
 	sum32(&rf->buf[rf->p_acstart], altcs_bsize, &acs, &acx);
 
-	fprintf(dbg_stream, "alt cks block 0x%06lX - 0x%06lX: sumt=0x%08lX, xort=0x%08lX\n",
+	DBG_PRINTF("alt cks block 0x%06lX - 0x%06lX: sumt=0x%08lX, xort=0x%08lX\n",
 		(unsigned long) rf->p_acstart, (unsigned long) rf->p_acend,
 			(unsigned long) acs, (unsigned long) acx);
 	pacs = u32memstr(rf->buf, rf->siz, acs);
 	pacx = u32memstr(rf->buf, rf->siz, acx);
 	if (!pacs || !pacx) {
-		fprintf(dbg_stream, "altcks values not found in ROM, possibly unskipped vals or bad algo\n");
+		DBG_PRINTF("altcks values not found in ROM, possibly unskipped vals or bad algo\n");
 		return -1;
 	} else {
 		rf->p_acs = (u32) (pacs - rf->buf);
 		rf->p_acx = (u32) (pacx - rf->buf);
-		fprintf(dbg_stream, "confirmed altcks values found : acs @ 0x%lX, acx @ 0x%lX\n",
+		DBG_PRINTF("confirmed altcks values found : acs @ 0x%lX, acx @ 0x%lX\n",
 				(unsigned long) rf->p_acs, (unsigned long) rf->p_acx);
 		rf->cks_alt_good = 1;
 		//TODO : validate altcks val offsets VS end-of-IVT2, i.e. they seem to be always @
@@ -450,7 +456,7 @@ bool find_ecurec(struct romfile *rf) {
 		break;
 	}
 	if (!found) {
-		fprintf(dbg_stream, "IVT2/ROMEND not found\n");
+		DBG_PRINTF("IVT2/ROMEND not found\n");
 		return 0;
 	}
 	rf->p_ivt2 = ft->IVT2_expected;
@@ -491,7 +497,7 @@ u32 find_ramf(struct romfile *rf) {
 			found_stuff = find_ecurec(rf);
 		}
 		if (!found_stuff) {
-			fprintf(dbg_stream, "not trying to find RAMF.\n");
+			DBG_PRINTF("not trying to find RAMF.\n");
 			return 0;
 		}
 	} else {
@@ -500,13 +506,13 @@ u32 find_ramf(struct romfile *rf) {
 		if (testval != ft->RAMF_header) {
 			long ramf_adj = 4;
 			long sign = 1;
-			fprintf(dbg_stream, "Unlikely contents for struct ramf; got 0x%lX.\n",
+			DBG_PRINTF("Unlikely contents for struct ramf; got 0x%lX.\n",
 						(unsigned long) testval);
 			while (ramf_adj < ft->pRAMF_maxdist) {
 				//search around, in a pattern like +4, -4, +8, -8, +12  and then +16, +20 etc
 				testval = reconst_32(&rf->buf[rf->p_ramf + (sign * ramf_adj)]);
 				if (testval == ft->RAMF_header) {
-					fprintf(dbg_stream, "probable RAMF found @ delta = %+d\n",
+					DBG_PRINTF("probable RAMF found @ delta = %+d\n",
 								(int) (sign * ramf_adj));
 					rf->ramf_offset = (sign * ramf_adj);
 					rf->p_ramf += rf->ramf_offset;
@@ -529,7 +535,7 @@ u32 find_ramf(struct romfile *rf) {
 		if ((rf->p_acstart >= rf->siz) ||
 			(rf->p_acend >= rf->siz) ||
 			(rf->p_acstart >= rf->p_acend)) {
-			fprintf(dbg_stream, "bad alt cks bounds; 0x%lX - 0x%lX\n",
+			DBG_PRINTF("bad alt cks bounds; 0x%lX - 0x%lX\n",
 					(unsigned long) rf->p_acstart, (unsigned long) rf->p_acend);
 			rf->p_acstart = UINT32_MAX;
 			rf->p_acend = UINT32_MAX;
@@ -541,15 +547,15 @@ u32 find_ramf(struct romfile *rf) {
 
 	if (rf->p_ivt2 != UINT32_MAX) {
 		if (rf->p_ivt2 >= (rf->siz - IVT_MINSIZE)) {
-			fprintf(dbg_stream, "warning : IVT2 value out of bound, probably due to unusual RAMF structure.\n");
+			DBG_PRINTF("warning : IVT2 value out of bound, probably due to unusual RAMF structure.\n");
 			rf->p_ivt2 = UINT32_MAX;
 		} else {
 			if (rf->p_ivt2 != ft->IVT2_expected) {
-				fprintf(dbg_stream, "Unexpected IVT2 0x%lX ! Please report this\n", (unsigned long) rf->p_ivt2);
+				DBG_PRINTF("Unexpected IVT2 0x%lX ! Please report this\n", (unsigned long) rf->p_ivt2);
 			}
 			if (!check_ivt(&rf->buf[rf->p_ivt2], rf->siz - rf->p_ivt2)) {
-				fprintf(dbg_stream, "Unlikely IVT2 location 0x%06lX :\n", (unsigned long) rf->p_ivt2);
-				fprintf(dbg_stream, "%08lX %08lX %08lX %08lX...\n", (unsigned long) reconst_32(&rf->buf[rf->p_ivt2+0]),
+				DBG_PRINTF("Unlikely IVT2 location 0x%06lX :\n", (unsigned long) rf->p_ivt2);
+				DBG_PRINTF("%08lX %08lX %08lX %08lX...\n", (unsigned long) reconst_32(&rf->buf[rf->p_ivt2+0]),
 							(unsigned long) reconst_32(&rf->buf[rf->p_ivt2+4]),
 							(unsigned long) reconst_32(&rf->buf[rf->p_ivt2+8]),
 							(unsigned long) reconst_32(&rf->buf[rf->p_ivt2+12]));
@@ -569,11 +575,11 @@ u32 find_ramf(struct romfile *rf) {
 	if (features & ROM_HAS_ECUREC) {
 		//parse ECUREC
 		if ((pecurec + 6) >= rf->siz) {
-			fprintf(dbg_stream, "unlikely pecurec = %lX\n", (unsigned long) pecurec);
+			DBG_PRINTF("unlikely pecurec = %lX\n", (unsigned long) pecurec);
 			pecurec = UINT32_MAX;
 		} else {
 			//skip leading '1'
-			fprintf(dbg_stream, "probable ECUID @ %lX: %.*s\n",
+			DBG_PRINTF("probable ECUID @ %lX: %.*s\n",
 					(unsigned long) pecurec, 5,  &rf->buf[pecurec + 1]);
 		}
 	}
@@ -599,7 +605,7 @@ u32 find_ramf(struct romfile *rf) {
 			rf->p_a2cs = p_as + pecurec;
 			rf->p_a2cx = p_ax + pecurec;
 		} else {
-			fprintf(dbg_stream, "alt2 checksum not found ?? Bad algo, bad skip, or other problem...\n");
+			DBG_PRINTF("alt2 checksum not found ?? Bad algo, bad skip, or other problem...\n");
 		}
 	}
 
@@ -808,7 +814,7 @@ static struct printable_prop *new_properties(struct romfile *rf) {
 		utstring_printf(&props[RP_FID_CPU].rendered_value, "%.8s", scpu);
 		utstring_printf(&props[RP_FID_CPUCODE].rendered_value, "%.2s", scpu+6);
 	} else {
-		fprintf(dbg_stream, "error: no FID struct ? Cannot continue.\n");
+		DBG_PRINTF("error: no FID struct ? Cannot continue.\n");
 		free_properties(props);
 		return NULL;
 	}
@@ -821,7 +827,7 @@ static struct printable_prop *new_properties(struct romfile *rf) {
 	if (features & ROM_HAS_ECUREC) {
 		//no RAMF for these
 	} else if (ramfpos == UINT32_MAX) {
-		fprintf(dbg_stream, "find_ramf() failed !!\n");
+		DBG_PRINTF("find_ramf() failed !!\n");
 	} else {
 		utstring_printf(&props[RP_RAMF_WEIRD].rendered_value, "%+d", rf->ramf_offset);
 		utstring_printf(&props[RP_RAMJUMP].rendered_value, "0x%08X", rf->ramf.pRAMjump);
@@ -834,7 +840,7 @@ static struct printable_prop *new_properties(struct romfile *rf) {
 			ivt_conf = 99;
 		} else {
 			u32 iter;
-			fprintf(dbg_stream, "no IVT2 ?? wtf. Last resort, brute force technique:\n");
+			DBG_PRINTF("no IVT2 ?? wtf. Last resort, brute force technique:\n");
 			iter = 0x100;	//skip power-on IVT
 			bool ivtfound = 0;
 			while ((iter + 0x400) < rf->siz) {
@@ -842,15 +848,15 @@ static struct printable_prop *new_properties(struct romfile *rf) {
 				new_offs = find_ivt(rf->buf + iter, rf->siz - iter);
 				if (new_offs == UINT32_MAX) {
 					if (ivtfound) break;
-					fprintf(dbg_stream, "\t no IVT2 found.\n");
+					DBG_PRINTF("\t no IVT2 found.\n");
 					break;
 				}
 				iter += new_offs;
 				ivt_conf = 50;
-				fprintf(dbg_stream, "\tPossible IVT @ 0x%lX\n",(unsigned long) iter);
+				DBG_PRINTF("\tPossible IVT @ 0x%lX\n",(unsigned long) iter);
 				if (reconst_32(rf->buf + iter + 4) ==0xffff7ffc) {
 					ivt_conf = 75;
-					fprintf(dbg_stream, "\t\tProbable IVT !\n");
+					DBG_PRINTF("\t\tProbable IVT !\n");
 					ivtfound = 1;
 				}
 				iter += 0x4;
@@ -891,7 +897,7 @@ static struct printable_prop *new_properties(struct romfile *rf) {
 	//known / guessed keysets
 	enum key_quality keyq;
 	uint32_t s27k, s36k;
-	keyq = find_s27_hardcore(rf->buf, rf->siz, &s27k, &s36k);
+	keyq = find_s27_hardcore(rf->romdb, rf->buf, rf->siz, &s27k, &s36k);
 	if (keyq > KEYQ_UNK) {
 		utstring_printf(&props[RP_KEYSET_QUAL].rendered_value, "%d", keyq);
 		utstring_printf(&props[RP_S27K].rendered_value, "0x%08lX", (unsigned long) s27k);
@@ -899,7 +905,7 @@ static struct printable_prop *new_properties(struct romfile *rf) {
 	} else {
 		// only bruteforce if code analysis failed, since it's much slower
 		const struct keyset_t *tmp_keyset;
-		tmp_keyset = find_keys_bruteforce(rf->buf, rf->siz, &keyq, 0);
+		tmp_keyset = find_keys_bruteforce(rf->romdb, rf->buf, rf->siz, &keyq, 0);
 		if (tmp_keyset && (keyq > KEYQ_UNK)) {
 			utstring_printf(&props[RP_KEYSET_QUAL].rendered_value, "%d", keyq);
 			utstring_printf(&props[RP_S27K].rendered_value, "0x%08lX",
@@ -929,6 +935,7 @@ static struct printable_prop *new_properties(struct romfile *rf) {
 	MD5Final(md5_digest, &md5c);
 	render_md5(md5_digest, md5_str);
 	utstring_printf(&props[RP_MD5].rendered_value, "%s", md5_str);
+	DBG_PRINTF("MD5: %s\n", md5_str);
 
 	return props;
 }
@@ -945,6 +952,44 @@ static void free_properties(struct printable_prop *props) {
 	free(props);
 	return;
 }
+
+
+/** get length of the path prefix of a given filename
+ *
+ * i.e. strips the filename and keeps the absolute or relative path, including
+ * last trailing dir separator / or \
+ *
+ * "~/d/stuff/file.txt" => length of "~/d/stuff/"
+ *
+ * why do I need to reinvent wheels
+ */
+static size_t get_path_len(const char *filename) {
+	// search backwards for a fwd/back slash
+
+	const char *pfile;
+    pfile = filename + strlen(filename);
+    for (; pfile > filename; pfile--) {
+        if ((*pfile == '\\') || (*pfile == '/')) {
+            pfile++;
+            break;
+        }
+    }
+    return (size_t) (pfile - filename);
+}
+
+
+/* e.g. csv_filename = "file.csv", and argv0 = "~/d/stuff/nisrom",
+ * this prints "~/d/stuff/file.csv" into the given UT_string (must already be initialized)
+ */
+static void generate_csv_path(UT_string *dest, const char *csv_filename, const char *argv0) {
+	assert(dest && csv_filename && argv0);
+
+	size_t base_len = get_path_len(argv0);
+	utstring_bincpy(dest, argv0, base_len);	//no 0-term
+	utstring_printf(dest, "%s", csv_filename);
+	return;
+}
+
 
 static void usage(void) {
 	printf(	"**** %s\n"
@@ -1033,18 +1078,32 @@ int main(int argc, char *argv[])
 		return -1;
 	}
 
+	rf.romdb = romdb_new();
+	if (!rf.romdb) {
+		ERR_PRINTF("trouble in romdb_new\n");
+		goto badexit;
+	}
+
+	UT_string csvpath;
+	utstring_init(&csvpath);
+	generate_csv_path(&csvpath, KEYSET_CSV, argv[0]);
+
+	if (!romdb_keyset_addcsv(rf.romdb, utstring_body(&csvpath))) {
+		ERR_PRINTF("csv trouble\n");
+		goto badexit;
+	}
+
 	if (open_rom(&rf, filename)) {
-		if (dbg_file) fclose(dbg_stream);
 		ERR_PRINTF("Trouble in open_rom()\n");
-		return -1;
+		goto badexit;
 	}
 
 	/* add header to dbg log */
-	fprintf(dbg_stream, "\n********************\n**** Started analyzing %s\n", filename);
+	DBG_PRINTF("\n********************\n**** Started analyzing %s\n", filename);
 
 	struct printable_prop *props = new_properties(&rf);
 	if (!props) {
-		return -1;
+		goto badexit;
 	}
 
 	if (enable_human) {
@@ -1064,10 +1123,21 @@ int main(int argc, char *argv[])
 	while (1) {
 		ctpos = find_calltable(rf.buf, ctpos + ctlen * 4, rf.siz, &ctlen);
 		if (ctpos == (u32) -1) break;
-		fprintf(dbg_stream, "possible calltable @ %lX, len=0x%X\n", (unsigned long) ctpos, ctlen);
+		DBG_PRINTF("possible calltable @ %lX, len=0x%X\n", (unsigned long) ctpos, ctlen);
 	}
 
+	romdb_close(rf.romdb);
+	rf.romdb = NULL;
 	close_rom(&rf);
 	if (dbg_file) fclose(dbg_stream);
 	return 0;
+
+badexit:
+	if (rf.romdb) {
+		romdb_close(rf.romdb);
+		rf.romdb = NULL;
+	}
+	close_rom(&rf);
+	if (dbg_file) fclose(dbg_stream);
+	return -1;
 }

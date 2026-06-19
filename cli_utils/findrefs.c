@@ -395,7 +395,8 @@ void findrefs(const u8 *src, u32 siz, u32 base, u32 offs) {
 
 int main(int argc, char * argv[]) {
 	unsigned long tgt, minbase, base, offs;
-	FILE *i_file;
+	FILE *i_file = NULL;
+	u8 *src = NULL;
 
 	if ((argc < 3) || (argc > 4)) {
 		printf(	"**** %s\n"
@@ -434,7 +435,7 @@ int main(int argc, char * argv[]) {
 	dbg_stream = tmpfile();	//before calling nislib funcs
 	if (dbg_stream == NULL) {
 		printf("problem creating temp file!?\n");
-		return 1;
+		goto badexit;
 	}
 
 	rewind(i_file);
@@ -443,20 +444,16 @@ int main(int argc, char * argv[]) {
 		printf("huge file (length %lu)\n", (unsigned long) file_len);
 	}
 
-	u8 *src = malloc(file_len);
+	src = malloc(file_len);
 	if (!src) {
 		printf("malloc choke\n");
-		fclose(i_file);
-		fclose(dbg_stream);
-		return 0;
+		goto badexit;
 	}
 
 	/* load whole ROM */
 	if (fread(src,1,file_len,i_file) != file_len) {
 		printf("trouble reading\n");
-		free(src);
-		fclose(dbg_stream);
-		return 0;
+		goto badexit;
 	}
 	fclose(i_file);
 
@@ -468,5 +465,17 @@ int main(int argc, char * argv[]) {
 	free(src);
 	fclose(dbg_stream);
 	return 0;
+
+badexit:
+	if (src) {
+		free(src);
+	}
+	if (i_file) {
+		fclose(i_file);
+	}
+	if (dbg_stream) {
+		fclose(dbg_stream);
+	}
+	return 1;
 }
 

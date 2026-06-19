@@ -9,6 +9,7 @@
 #include <stdbool.h>
 
 #include "nislib.h"
+#include "nisrom_finders.h"
 #include "nislib_shtools.h"
 #include "nisrom_finders.h"
 #include "sh_opcodes.h"

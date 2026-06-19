@@ -27,7 +27,7 @@ devlist = [
 	devtype("7055_350", 0xffff6000, 0x8000, 0xffffe000, 0x2000, "ivt_7055.csv", "regs_7055_350.csv"),
 	devtype("7055_180", 0xffff6000, 0x8000, 0xffffe000, 0x2000, "ivt_7055.csv", "regs_7055_180.csv"),
 	devtype("7058", 0xffff0000, 0xc000, 0xffffc000, 0x4000, "ivt_7055.csv", "regs_7058.csv"),	#almost identical to 7058S
-	devtype("7059", 0xfffe8000, 0x14000, 0xffffc000, 0x4000, "ivt_7059.csv", "regs_7059.csv"),	#typo in DS
+	devtype("7059", 0xfffe8000, 0x14000, 0xffffc000, 0x4000, "ivt_7055.csv", "regs_7058.csv"),	#typo in DS
 	devtype("72531", 0xfff80000, 0x10000, 0xfffc0000, 0x40000, "ivt_7253.csv", "regs_7253.csv"),
 	devtype("72533", 0xfff80000, 0x18000, 0xfffc0000, 0x40000, "ivt_7253.csv", "regs_7253.csv")
 	]
@@ -39,7 +39,7 @@ fidtype = collections.namedtuple('fidtype', ['fidstring', 'cpustring', 'IVT2_add
 # the actual vectors are stored in separate files. 7055 and 7058 have identical vector tables
 fidlist = [
 	fidtype("SH705101", "7050", None),
-	fidtype("SH705415", "7054", None),
+	fidtype("SH705415", "7054", 0x1000),
 	fidtype("SH705507", "7055_350", None),
 	fidtype("SH705513", "7055_350", 0x1000),
 	fidtype("SH705519", "7055_180", 0x10004),
@@ -57,9 +57,6 @@ fidlist = [
 
 #create RAM and IO areas. device_base is a namedtuple
 def create_memblocks(device_base):
-	if not askYesNo("Nissan: SH7xxx memory areas", "create + setup memory regions ?"):
-		return
-
 	# set initial ROM mem block (containing address 0) to readonly
 	block = getMemoryBlock(toAddr(0))
 	block.setPermissions(1,0,1)
@@ -69,6 +66,7 @@ def create_memblocks(device_base):
 
 	# create RAM mem block : uninitialized, RW
 	createMemoryBlock("RAM", toAddr(device_base.RAMstart), None, device_base.RAMsize, 0)
+	ioblock.setPermissions(1,1,0)
 
 	# create IO mem block : uninit, RW and volatile
 	ioblock = createMemoryBlock("IO", toAddr(device_base.IOstart), None, device_base.IOsize, 0)
@@ -85,10 +83,6 @@ def get_fidtype(fidstring):
 	return next((x for x in fidlist if x.fidstring == fidstring), None)
 
 
-#return a fidtype namedtuple
-def prompt_fid():
-	return askChoice("FIDtype selection", "Select CPU code (for int vectors)", fidlist, fidlist[0])
-
 #find FID CPU string (or ask user selection if not found), return a fidtype namedtuple
 def find_fid():
 	block = getMemoryBlock(toAddr(0))
@@ -99,15 +93,19 @@ def find_fid():
 	#findBytes(block.getEnd(), block.getStart(), bytes("DATABASE"), None)	# TypeError: findBytes(): 1st arg can't be coerced to ghidra.program.model.address.Address,
 
 	fid_pos = currentProgram.getMemory().findBytes(block.getEnd(), bytes("DATABASE"), None, 0, monitor)
+	fidtype = None
 	if fid_pos:
 		print "found DATABASE string at", fid_pos
 		#SHxxxxyy string is 13 bytes later. Change my mind
 		cpustring_pos = fid_pos.addNoWrap(13)
 		cpustring = getBytes(cpustring_pos, 8).tostring()
-		return get_fidtype(cpustring)
+		fidtype = get_fidtype(cpustring)
 
-	print "could not determine FID type automatically."
-	return prompt_fid()
+	if not fidtype:
+		return askChoice("Nissan: FID type", "Could not detect FID type. Select one: ", fidlist, fidlist[0])
+	else:
+		return askChoice("Nissan: FID type", "Detected " + fidtype.fidstring + " . Change if desired ",
+			fidlist, next(x for x in fidlist if x.cpustring == fidtype.cpustring))
 
 
 def create_one_vector(label, addr, comment):
@@ -123,9 +121,6 @@ def create_one_vector(label, addr, comment):
 #open vector definitions file and create vector tables
 #if ivt2_offset is specified, produce a dual IVT (Nissan)
 def create_vectors(devtype_base, ivt2_offset):
-	if not askYesNo("Nissan: SH7xxx interrupt vectors", "create + setup Interrupt vectors ?"):
-		return
-
 	#for some reason the "current directory" for open() is not the script's location.
 	script_location = os.path.dirname(sourceFile.getAbsolutePath())
 	csv_filename = os.path.join(script_location, devtype_base.vectlist_file)
@@ -151,9 +146,6 @@ def create_vectors(devtype_base, ivt2_offset):
 
 # define peripheral regs
 def create_ioregs(devtype_base):
-	if not askYesNo("Nissan: SH7xxx IO regs", "create MMIO peripheral registers?"):
-		return
-
 	#for some reason the "current directory" for open() is not the script's location.
 	script_location = os.path.dirname(sourceFile.getAbsolutePath())
 	csv_filename = os.path.join(script_location, devtype_base.regs_csv)
@@ -167,45 +159,41 @@ def create_ioregs(devtype_base):
 			# create as Primary label
 			createLabel(toAddr(reg_addr), reg_name, 1)
 
+# niceness : offer to not create everything. Useful for partially-defined projects
+def create_all(devtype_base, IVT2):
+	enabled_ops = askChoices("Select operations", "The script will now create/define the following:",
+		[ 1, 2, 3 ], ["Mem regions", "Interrupt vectors (+ IVT2 if applicable)", "MMIO peripheral registers"])
+	if 1 in enabled_ops:
+		create_memblocks(devtype_base)
+	if 2 in enabled_ops:
+		create_vectors(devtype_base, IVT2)
+	if 3 in enabled_ops:
+		create_ioregs(devtype_base)
+
 def mode_basic():
 	device_base = askChoice("CPU memory blocks", "Select device type", devlist, devlist[0])
-	create_memblocks(device_base)
-	create_vectors(device_base, None)
-	create_ioregs(device_base)
+	create_all(device_base, None)
 
-def mode_semi():
-	fidtype = prompt_fid()
-	devtype_base = get_devicetype(fidtype.cpustring)
-	create_memblocks(devtype_base)
-	create_vectors(devtype_base, fidtype.IVT2_addr)
-	create_ioregs(devtype_base)
-
-def mode_auto():
+def mode_nissan():
 	fidtype = find_fid()
 	devtype_base = get_devicetype(fidtype.cpustring)
-	create_memblocks(devtype_base)
-	create_vectors(devtype_base, fidtype.IVT2_addr)
-	create_ioregs(devtype_base)
+	create_all(devtype_base, fidtype.IVT2_addr)
 
 def main():
 	#Operation modes :
-	# full magic finds the FID cpu string (e.g. "SH705513") and defines everything based on that.
-	# semi-magic finds the FID cpu string but allows some changes
+	# Nissan finds the FID cpu string (e.g. "SH705513") and defines everything based on that.
 	# basic is basic
 
 	#Surely there's a better way to do this
 	opmodes = [
-		"Full-auto magic (Nissan only)",
-		"Semi-magic (Nissan only)",
+		"Nissan (detect or choose FID CPU type)",
 		"Basic (bare SH7xxx)"
 	]
 	opmode_string = askChoice("Nissan ROM loader", "Select operation mode", opmodes, opmodes[0])
 	op_idx = opmodes.index(opmode_string)
 	if op_idx == 0:
-		mode_auto()
+		mode_nissan()
 	elif op_idx == 1:
-		mode_semi()
-	elif op_idx == 2:
 		mode_basic()
 
 
