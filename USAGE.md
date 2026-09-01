@@ -49,6 +49,7 @@ nisrom -l                   # print CSV column headers only (no ROM file needed)
 ```
 
 **AI notes:**
+
 - `nisrom` is **analysis only** — it never modifies the ROM file. There is no
   `--fix` flag. Use `nisckfix1` or `nisckfix2` to fix checksums after editing.
 - **`nisrom` derives s27k/s36k directly from the ROM binary** via code analysis
@@ -86,6 +87,7 @@ nisckfix1 757c 7574 0xbfff4 patched.bin fixed.bin
 ```
 
 **AI notes:**
+
 - Use `nisrom rom.bin` to get `&std_s` and `&std_x` before calling nisckfix.
 - `nisckfix1` takes three address arguments; `nisckfix2` takes two (no `&corrections`).
 - All addresses are **file offsets** — not hardware VAs.
@@ -157,6 +159,7 @@ nisguess <enc> <dec>
 Both arguments are uint32 hex values.
 
 **AI notes:**
+
 - `nisguess` / `nisguess2` are brute-force tools — runtime scales with key
   space. They require at least one known plaintext/ciphertext pair.
 - If the ROM is available, run `nisrom rom.bin` first — it may extract s27k/s36k
@@ -191,6 +194,7 @@ findcallargs 0x56738 0x66 rom.bin
 ```
 
 **AI notes:**
+
 - All addresses passed to `findcallargs` and `findrefs` are **file offsets**,
   not hardware VAs. Ghidra loads at base 0x0 so VA = file offset in that
   project, but hardware ROM base is 0xFFFC0000. Always confirm which address
@@ -242,6 +246,7 @@ grep 6S710 romdb/keysets.csv
 ```
 
 **AI notes:**
+
 - There is no `keyset_lookup.py` script in nissutils. Keys are found either
   by `nisrom` (code analysis of the ROM) or by grepping `keysets.csv` directly.
 - If a keyset is not in `keysets.csv` and `nisrom` cannot derive it, the keys
