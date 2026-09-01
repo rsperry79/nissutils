@@ -1,0 +1,14 @@
+cli_utils/*.exe
+cli_utils/findcallargs
+cli_utils/findrefs
+cli_utils/nisckfix1
+cli_utils/nisckfix2
+cli_utils/nisdec1
+cli_utils/nisenc1
+cli_utils/nisguess
+cli_utils/nisguess2
+cli_utils/nisrom
+cli_utils/test_ecuidlist
+cli_utils/test_findcks
+cli_utils/test_romdb
+cli_utils/unpackdat

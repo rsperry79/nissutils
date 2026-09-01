@@ -4,6 +4,7 @@ Nissan / generic SH-based ROM loader for Ghidra
 GPLv3
 
 # Intro
+
 This script is mainly designed for Nissan ECU ROMs but can be useful on other ROMs based on one of these  :
 
 - SH7050, SH7051
@@ -15,6 +16,7 @@ This script is mainly designed for Nissan ECU ROMs but can be useful on other RO
 - SH72543 (limited support, help needed)
 
 # Operating modes
+
 In "full auto" mode (only works for Nissan ROM dumps), this script will determine the correct CPU and define
 
 - memory areas
@@ -27,14 +29,16 @@ In "basic" mode, useful for generic or unknown ROMs, the script will prompt for 
 - basic interrupt vectors
 - IO peripheral registers
 
-
 # Expanding / adding support
+
 The raw data for vectors and registers are stored in .csv files. In addition, some tables may need to be expanded in nissan_load.py
 
 Feel free to expand or improve this, PR's are more than welcome.
 
 # Using
+
 The cleanest way is to use this script as the very first step after importing the .bin file.
+
 1. Open Script Manager
 2. One of the buttons top-right is "Manage Script directories"
 3. Add the directory containing this script.
@@ -44,6 +48,7 @@ The cleanest way is to use this script as the very first step after importing th
 # Examples
 
 Here is part of a dual-IVT ROM, with the second IVT at 0x1000 :
+
 ```
 000011da 27              ??         27h    '
 000011db 5c              ??         5Ch    \
@@ -59,13 +64,14 @@ Here is part of a dual-IVT ROM, with the second IVT at 0x1000 :
 ```
 
 Here, some IO regs showing correct names and xrefs:
+
 ```
-		 PAIOR_W                                 XREF[2]:     FUN_00000cc0:00000cc4(W),
+   PAIOR_W                                 XREF[2]:     FUN_00000cc0:00000cc4(W),
                                                               FUN_0000bf84:0000bf92(W)
 fffff720                 undefined2 ??
-		 PACRH_W                                 XREF[1]:     FUN_0000bf84:0000bf94(W)
+   PACRH_W                                 XREF[1]:     FUN_0000bf84:0000bf94(W)
 fffff722                 undefined2 ??
-		 PACRL_W                                 XREF[1]:     FUN_0000bf84:0000bfa0(W)
+   PACRL_W                                 XREF[1]:     FUN_0000bf84:0000bfa0(W)
 fffff724                 undefined2 ??
 ```
 
